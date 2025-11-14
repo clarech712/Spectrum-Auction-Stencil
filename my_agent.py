@@ -11,7 +11,7 @@ import json
 from path_utils import path_from_local_root
 
 
-NAME = # TODO: Please give your agent a NAME
+NAME = "shiitake" # TODO: Please give your agent a NAME
 
 class MyAgent(MyLSVMAgent):
     def setup(self):
@@ -23,7 +23,9 @@ class MyAgent(MyLSVMAgent):
         min_bids = self.get_min_bids()
         valuations = self.get_valuations() 
         bids = {} 
-        ...
+        for good in self.get_goods():
+            if valuations[good] >= min_bids[good]:
+                bids[good] = valuations[good]
         return bids
 
     def regional_bidder_strategy(self): 
@@ -31,7 +33,9 @@ class MyAgent(MyLSVMAgent):
         min_bids = self.get_min_bids()
         valuations = self.get_valuations() 
         bids = {} 
-        ...
+        for good in self.get_goods():
+            if valuations[good] >= min_bids[good]:
+                bids[good] = valuations[good]
         return bids
 
     def get_bids(self):
