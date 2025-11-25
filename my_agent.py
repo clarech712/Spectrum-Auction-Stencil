@@ -71,8 +71,7 @@ class MyAgent(MyLSVMAgent):
     # ---------------------------------------------------------
     # BIDDING
     # ---------------------------------------------------------
-    def national_bidder_strategy(self):
-        # TODO: Integrate learnt deviations self.a with bidding
+    def minbidder_strategy(self):
         min_bids = self.get_min_bids()
         valuations = self.get_valuations() 
         bids = {} 
@@ -81,14 +80,16 @@ class MyAgent(MyLSVMAgent):
                 bids[good] = valuations[good]
         return bids
 
+    def national_bidder_strategy(self):
+        bids = self.minbidder_strategy() # 1. MinBidder
+        bids = self.take_action_national(bids) # 2. Learning
+        bids = self.connect_sccs_national(bids) # 3. Heuristics
+        return bids
+
     def regional_bidder_strategy(self):
-        # TODO: Integrate learnt deviations self.a with bidding
-        min_bids = self.get_min_bids()
-        valuations = self.get_valuations() 
-        bids = {} 
-        for good in self.get_goods():
-            if valuations[good] >= min_bids[good]:
-                bids[good] = valuations[good]
+        bids = self.minbidder_strategy() # 1. MinBidder
+        bids = self.take_action_national(bids) # 2. Learning
+        bids = self.connect_sccs_regional(bids) # 3. Heuristics
         return bids
 
     def get_bids(self):
@@ -98,7 +99,7 @@ class MyAgent(MyLSVMAgent):
             return self.regional_bidder_strategy()
 
     # ---------------------------------------------------------
-    # LEARNING
+    # LEARNING (Klara)
     # ---------------------------------------------------------
     def determine_state(self):
         curr_state = 0
@@ -119,6 +120,23 @@ class MyAgent(MyLSVMAgent):
             return self.training_policy.get_move(self.s)
         else:
             return np.argmax(self.q[s_prime])
+
+    def take_action_national(self, bids):
+        return bids
+
+    def take_action_regional(self, bids):
+        return bids
+    
+    # ---------------------------------------------------------
+    # HEURISTICS (Ahana - lmk if you need to go outside of this box)
+    # ---------------------------------------------------------
+    def connect_sccs_national(self, bids):
+        # TODO: Extend bundle to ensure SCC of 9-13 tiles
+        return bids
+
+    def connect_sccs_regional(self, bids):
+        # TODO: Extend bundle to ensure SCC of 3-7 tiles
+        return bids
     
     # ---------------------------------------------------------
     # WRAPPING UP
