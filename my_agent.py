@@ -10,16 +10,69 @@ import gzip
 import json
 from path_utils import path_from_local_root
 
+import numpy as np
+from uniform_policy import UniformPolicy
 
-NAME = "shiitake" # TODO: Please give your agent a NAME
+
+NAME = "mulberry"
+NUM_POSSIBLE_STATES = 10
+NUM_POSSIBLE_ACTIONS = 3 # Action i denotes 0.1 * i deviation
+INITIAL_STATE = 0
+LEARNING_RATE = 0.05
+DISCOUNT_FACTOR = 0.90
+EXPLORATION_RATE = 0.05
+TRAINING_MODE = True
+SAVE_PATH_PREFIX = "qtable"
 
 class MyAgent(MyLSVMAgent):
-    def setup(self):
-        #TODO: Fill out with anything you want to initialize each auction
-        pass 
+    def __init__(self, name,
+                 num_possible_states=NUM_POSSIBLE_STATES,
+                 num_possible_actions=NUM_POSSIBLE_ACTIONS,
+                 initial_state=INITIAL_STATE,
+                 learning_rate=LEARNING_RATE, discount_factor=DISCOUNT_FACTOR,
+                 exploration_rate=EXPLORATION_RATE,
+                 training_mode=TRAINING_MODE, save_path_prefix=SAVE_PATH_PREFIX):
+        # LEARNING
+        self.num_possible_states = num_possible_states
+        self.num_possible_actions = num_possible_actions
+        self.learning_rate = learning_rate
+        self.discount_factor = discount_factor
+        self.exploration_rate = exploration_rate
+        self.training_mode = training_mode
+        self.save_path_prefix = save_path_prefix
+        self.s = initial_state
+        super().__init__(name)
+
+    def _get_save_path(self):
+        # Separate Q-tables for national and regional bidder
+        save_path_suffix = "_nat" if self.is_national_bidder() else "_reg"
+        return self.save_path_prefix + save_path_suffix + ".npy"
     
-    def national_bidder_strategy(self): 
-        # TODO: Fill out with your national bidder strategy
+    def setup(self, restarts=20):
+        # LEARNING
+        self.my_states = []
+        self.training_policy = UniformPolicy(self.num_possible_actions)
+
+        if self.save_path_prefix and os.path.isfile(self._get_save_path()):
+            with open(self._get_save_path(), 'rb') as saved_q_table:
+                self.q = np.load(saved_q_table)
+                assert self.q.shape[0] == self.num_possible_states, "The Saved Q-Table has a different number of states than inputed, To train on the new states please delete the Saved Q-Table"
+                assert self.q.shape[1] == self.num_possible_actions, "The number of possible actions in the saved file is different from the actual game, please delete and train again."
+        else:
+            # Initialize Q to random [-1, 1]
+            self.q = np.array([[random.uniform(-1, 1)
+                                for _ in range(self.num_possible_actions)]
+                               for _ in range(self.num_possible_states)])
+
+        # Begin with initial state and random action
+        self.a = self.training_policy.get_move(self.s)
+        self.s_prime = None
+    
+    # ---------------------------------------------------------
+    # BIDDING
+    # ---------------------------------------------------------
+    def national_bidder_strategy(self):
+        # TODO: Integrate learnt deviations self.a with bidding
         min_bids = self.get_min_bids()
         valuations = self.get_valuations() 
         bids = {} 
@@ -28,8 +81,8 @@ class MyAgent(MyLSVMAgent):
                 bids[good] = valuations[good]
         return bids
 
-    def regional_bidder_strategy(self): 
-        # TODO: Fill out with your regional bidder strategy
+    def regional_bidder_strategy(self):
+        # TODO: Integrate learnt deviations self.a with bidding
         min_bids = self.get_min_bids()
         valuations = self.get_valuations() 
         bids = {} 
@@ -43,14 +96,44 @@ class MyAgent(MyLSVMAgent):
             return self.national_bidder_strategy()
         else: 
             return self.regional_bidder_strategy()
+
+    # ---------------------------------------------------------
+    # LEARNING
+    # ---------------------------------------------------------
+    def determine_state(self):
+        curr_state = 0
+        # TODO: Develop states
+        return curr_state
+
+    def update_rule(self, reward):
+        self.q[self.s, self.a] += self.learning_rate * \
+            (reward + self.discount_factor *
+             np.max(self.q[self.s_prime]) - self.q[self.s, self.a])
+        if self.save_path_prefix:
+            with open(self._get_save_path(), 'wb') as saved_q_table:
+                np.save(saved_q_table, self.q)
+
+    def choose_next_move(self, s_prime):
+        # In the next round, your agent will be in state [s_prime]. What move will it play?
+        if (self.training_mode and random.random() < self.exploration_rate):
+            return self.training_policy.get_move(self.s)
+        else:
+            return np.argmax(self.q[s_prime])
     
+    # ---------------------------------------------------------
+    # WRAPPING UP
+    # ---------------------------------------------------------
     def update(self):
-        #TODO: Fill out with anything you want to update each round
-        pass 
+        # LEARNING
+        self.s_prime = self.determine_state()
+        previous_util = self.get_previous_util()[-1] # Given its tentative allocation in the previous round of the auction
+        self.update_rule(previous_util)
+        self.s = self.s_prime
+        self.a = self.choose_next_move(self.s_prime)
+        self.s_prime = None 
 
     def teardown(self):
-        #TODO: Fill out with anything you want to run at the end of each auction
-        pass 
+        pass
 
 ################### SUBMISSION #####################
 my_agent_submission = MyAgent(NAME)
