@@ -11,6 +11,7 @@ import json
 from path_utils import path_from_local_root
 
 import numpy as np
+from collections import deque
 from uniform_policy import UniformPolicy
 
 
@@ -21,8 +22,8 @@ INITIAL_STATE = 0
 LEARNING_RATE = 0.05
 DISCOUNT_FACTOR = 0.90
 EXPLORATION_RATE = 0.05
-TRAINING_MODE = True
-SAVE_PATH_PREFIX = "qtable"
+TRAINING_MODE = False
+SAVE_PATH_PREFIX = None # "qtable"
 
 class MyAgent(MyLSVMAgent):
     def __init__(self, name,
@@ -99,7 +100,7 @@ class MyAgent(MyLSVMAgent):
             return self.regional_bidder_strategy()
 
     # ---------------------------------------------------------
-    # LEARNING (Klara)
+    # LEARNING
     # ---------------------------------------------------------
     def determine_state(self):
         curr_state = 0
@@ -128,15 +129,99 @@ class MyAgent(MyLSVMAgent):
         return bids
     
     # ---------------------------------------------------------
-    # HEURISTICS (Ahana - lmk if you need to go outside of this box)
+    # HEURISTICS
+    # 
+    # We have a grid of goods as follows:
+    #     _   _   _   _   _   _ 
+    #   | A | B | C | D | E | F |
+    #     _   _   _   _   _   _ 
+    #   | G | H | I | J | K | L |
+    #     _   _   _   _   _   _ 
+    #   | M | N | O | P | Q | R |
+    #     _   _   _   _   _   _ 
+    # We keep expanding the largest component in the bundle by
+    # the cheapest tile until we reach a fixed threshold size
+    # for the largest component.
+    #
     # ---------------------------------------------------------
+    def _get_adj(self):
+        # Adjacency list for goods
+        goods = sorted(list(self.get_goods()))
+        rows, cols = self.get_shape()
+        adj = {g: [] for g in goods}
+        for i, g in enumerate(goods):
+            r, c = divmod(i, cols)
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < rows and 0 <= nc < cols:
+                    adj[g].append(goods[nr * cols + nc])
+        return adj
+
+    def _get_components(self, current, adj):
+        # Components in current bundle ordered from largest to smallest
+        seen = set()
+        comps = []
+        for g in current:
+            if g in seen:
+                continue
+            seen.add(g)
+            comp = set([g])
+            q = deque([g])
+            while q:
+                cur = q.popleft()
+                for nb in adj[cur]:
+                    if nb in current and nb not in seen:
+                        seen.add(nb)
+                        comp.add(nb)
+                        q.append(nb)
+            comps.append(comp)
+        comps.sort(key=lambda c: len(c), reverse=True)
+        return comps
+
+    def _get_frontier(self, comp, current, adj):
+        # Tiles adjacent to component but not in current bundle
+        frontier = set()
+        for g in comp:
+            for nb in adj[g]:
+                if nb not in current:
+                    frontier.add(nb)
+        return frontier
+
+    def _grow_to_threshold(self, bids, required=5):
+        # TODO: Extremely rudimentary, needs iterations
+        min_bids = self.get_min_bids()
+        adj = self._get_adj() # Form {'A': ['G', 'B'], ...} (sanity-checked)
+        
+        # Get components in current bundle
+        current = set(bids.keys())
+        comps = self._get_components(current, adj) # Form [{'M', 'G', 'N'}, {'F'}, ...] (sanity-checked)
+
+        # Components already satisfy threshold
+        if comps and len(comps[0]) >= required:
+            return bids
+        
+        while True:
+            comps = self._get_components(current, adj)
+            largest = comps[0] if comps else set()
+            # Components now satisfy threshold
+            if len(largest) >= required:
+                return bids
+            # Else expand largest component by cheapest tile
+            frontier = self._get_frontier(largest, current, adj) if largest else set()
+            if frontier:
+                cheapest = min(frontier, key=lambda g: min_bids[g])
+                bids[cheapest] = min_bids[cheapest]
+                current.add(cheapest)
+            else:
+                return bids
+
     def connect_sccs_national(self, bids):
-        # TODO: Extend bundle to ensure SCC of 9-13 tiles
-        return bids
+        # Extend bundle to ensure SCC of 9-13 tiles
+        return self._grow_to_threshold(bids, required=9)
 
     def connect_sccs_regional(self, bids):
-        # TODO: Extend bundle to ensure SCC of 3-7 tiles
-        return bids
+        # Extend bundle to ensure SCC of 3-7 tiles
+        return self._grow_to_threshold(bids, required=3)
     
     # ---------------------------------------------------------
     # WRAPPING UP
