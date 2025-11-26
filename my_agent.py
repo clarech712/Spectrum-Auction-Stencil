@@ -79,7 +79,7 @@ class MyAgent(MyLSVMAgent):
     #     _   _   _   _   _   _ 
     # ---------------------------------------------------------
     # ---------------------------------------------------------
-    # Convervative: Just MinBidder.
+    # Conservative: Just MinBidder.
     # ---------------------------------------------------------
     def strategy_conservative(self):
         min_bids = self.get_min_bids()
