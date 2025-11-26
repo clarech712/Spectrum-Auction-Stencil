@@ -16,14 +16,14 @@ from uniform_policy import UniformPolicy
 
 
 NAME = "mulberry"
-NUM_POSSIBLE_STATES = 10
-NUM_POSSIBLE_ACTIONS = 3 # Action i denotes 0.1 * i deviation
+NUM_POSSIBLE_STATES = 1 # Currently a bandit
+NUM_POSSIBLE_ACTIONS = 2
 INITIAL_STATE = 0
 LEARNING_RATE = 0.05
 DISCOUNT_FACTOR = 0.90
 EXPLORATION_RATE = 0.05
 TRAINING_MODE = False
-SAVE_PATH_PREFIX = None # "qtable"
+SAVE_PATH_PREFIX = "qtable"
 
 class MyAgent(MyLSVMAgent):
     def __init__(self, name,
@@ -33,7 +33,6 @@ class MyAgent(MyLSVMAgent):
                  learning_rate=LEARNING_RATE, discount_factor=DISCOUNT_FACTOR,
                  exploration_rate=EXPLORATION_RATE,
                  training_mode=TRAINING_MODE, save_path_prefix=SAVE_PATH_PREFIX):
-        # LEARNING
         self.num_possible_states = num_possible_states
         self.num_possible_actions = num_possible_actions
         self.learning_rate = learning_rate
@@ -50,7 +49,6 @@ class MyAgent(MyLSVMAgent):
         return self.save_path_prefix + save_path_suffix + ".npy"
     
     def setup(self, restarts=20):
-        # LEARNING
         self.my_states = []
         self.training_policy = UniformPolicy(self.num_possible_actions)
 
@@ -70,67 +68,7 @@ class MyAgent(MyLSVMAgent):
         self.s_prime = None
     
     # ---------------------------------------------------------
-    # BIDDING
-    # ---------------------------------------------------------
-    def minbidder_strategy(self):
-        min_bids = self.get_min_bids()
-        valuations = self.get_valuations() 
-        bids = {} 
-        for good in self.get_goods():
-            if valuations[good] >= min_bids[good]:
-                bids[good] = valuations[good]
-        return bids
-
-    def national_bidder_strategy(self):
-        bids = self.minbidder_strategy() # 1. MinBidder
-        bids = self.take_action_national(bids) # 2. Learning
-        bids = self.connect_sccs_national(bids) # 3. Heuristics
-        return bids
-
-    def regional_bidder_strategy(self):
-        bids = self.minbidder_strategy() # 1. MinBidder
-        bids = self.take_action_national(bids) # 2. Learning
-        bids = self.connect_sccs_regional(bids) # 3. Heuristics
-        return bids
-
-    def get_bids(self):
-        if self.is_national_bidder(): 
-            return self.national_bidder_strategy()
-        else: 
-            return self.regional_bidder_strategy()
-
-    # ---------------------------------------------------------
-    # LEARNING
-    # ---------------------------------------------------------
-    def determine_state(self):
-        curr_state = 0
-        # TODO: Develop states
-        return curr_state
-
-    def update_rule(self, reward):
-        self.q[self.s, self.a] += self.learning_rate * \
-            (reward + self.discount_factor *
-             np.max(self.q[self.s_prime]) - self.q[self.s, self.a])
-        if self.save_path_prefix:
-            with open(self._get_save_path(), 'wb') as saved_q_table:
-                np.save(saved_q_table, self.q)
-
-    def choose_next_move(self, s_prime):
-        # In the next round, your agent will be in state [s_prime]. What move will it play?
-        if (self.training_mode and random.random() < self.exploration_rate):
-            return self.training_policy.get_move(self.s)
-        else:
-            return np.argmax(self.q[s_prime])
-
-    def take_action_national(self, bids):
-        return bids
-
-    def take_action_regional(self, bids):
-        return bids
-    
-    # ---------------------------------------------------------
-    # HEURISTICS
-    # 
+    # STRATEGIES
     # We have a grid of goods as follows:
     #     _   _   _   _   _   _ 
     #   | A | B | C | D | E | F |
@@ -139,10 +77,23 @@ class MyAgent(MyLSVMAgent):
     #     _   _   _   _   _   _ 
     #   | M | N | O | P | Q | R |
     #     _   _   _   _   _   _ 
-    # We keep expanding the largest component in the bundle by
-    # the cheapest tile until we reach a fixed threshold size
-    # for the largest component.
-    #
+    # ---------------------------------------------------------
+    # ---------------------------------------------------------
+    # Convervative: Just MinBidder.
+    # ---------------------------------------------------------
+    def strategy_conservative(self):
+        min_bids = self.get_min_bids()
+        valuations = self.get_valuations() 
+        bids = {} 
+        for good in self.get_goods():
+            if valuations[good] >= min_bids[good]:
+                bids[good] = valuations[good]
+        return bids
+
+    # ---------------------------------------------------------
+    # Expansionist: We keep expanding the largest component in the
+    # bundle by the cheapest tile until we reach a fixed threshold
+    # size for the largest component.
     # ---------------------------------------------------------
     def _get_adj(self):
         # Adjacency list for goods
@@ -188,7 +139,7 @@ class MyAgent(MyLSVMAgent):
         return frontier
 
     def _grow_to_threshold(self, bids, required=5):
-        # TODO: Extremely rudimentary, needs iterations
+        # TODO: Think about possible improvements
         min_bids = self.get_min_bids()
         adj = self._get_adj() # Form {'A': ['G', 'B'], ...} (sanity-checked)
         
@@ -215,19 +166,59 @@ class MyAgent(MyLSVMAgent):
             else:
                 return bids
 
-    def connect_sccs_national(self, bids):
-        # Extend bundle to ensure SCC of 9-13 tiles
+    def _connect_comps_national(self, bids):
+        # Extend bundle to ensure components of 9-13 tiles
         return self._grow_to_threshold(bids, required=9)
 
-    def connect_sccs_regional(self, bids):
-        # Extend bundle to ensure SCC of 3-7 tiles
+    def _connect_comps_regional(self, bids):
+        # Extend bundle to ensure components of 3-7 tiles
         return self._grow_to_threshold(bids, required=3)
+
+    def strategy_expansionist(self):
+        bids = self.strategy_conservative()
+        if self.is_national_bidder():
+            return self._connect_comps_national(bids)
+        else:
+            return self._connect_comps_regional(bids)
+
+    # ---------------------------------------------------------
+    # LEARNING
+    # ---------------------------------------------------------
+    def determine_state(self):
+        curr_state = 0
+        # TODO: Develop states (currently a bandit)
+        return curr_state
+
+    def update_rule(self, reward):
+        self.q[self.s, self.a] += self.learning_rate * \
+            (reward + self.discount_factor *
+             np.max(self.q[self.s_prime]) - self.q[self.s, self.a])
+        if self.save_path_prefix:
+            with open(self._get_save_path(), 'wb') as saved_q_table:
+                np.save(saved_q_table, self.q)
+
+    def choose_next_move(self, s_prime):
+        # In the next round, your agent will be in state [s_prime]. What move will it play?
+        if (self.training_mode and random.random() < self.exploration_rate):
+            return self.training_policy.get_move(self.s)
+        else:
+            return np.argmax(self.q[s_prime])
+    
+    # ---------------------------------------------------------
+    # BIDDING
+    # ---------------------------------------------------------
+    def get_bids(self):
+        # TODO: Develop more strategies
+        match self.a:
+            case 0:
+                return self.strategy_conservative()
+            case 1:
+                return self.strategy_expansionist()
     
     # ---------------------------------------------------------
     # WRAPPING UP
     # ---------------------------------------------------------
     def update(self):
-        # LEARNING
         self.s_prime = self.determine_state()
         previous_util = self.get_previous_util()[-1] # Given its tentative allocation in the previous round of the auction
         self.update_rule(previous_util)
