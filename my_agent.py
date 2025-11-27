@@ -16,8 +16,8 @@ from uniform_policy import UniformPolicy
 
 
 NAME = "mulberry"
-NUM_POSSIBLE_STATES = 1 # Currently a bandit
-NUM_POSSIBLE_ACTIONS = 2
+NUM_POSSIBLE_STATES = 18
+NUM_POSSIBLE_ACTIONS = 4
 INITIAL_STATE = 0
 LEARNING_RATE = 0.05
 DISCOUNT_FACTOR = 0.90
@@ -85,9 +85,21 @@ class MyAgent(MyLSVMAgent):
         min_bids = self.get_min_bids()
         valuations = self.get_valuations() 
         bids = {} 
-        for good in self.get_goods():
-            if valuations[good] >= min_bids[good]:
-                bids[good] = valuations[good]
+        for g in self.get_goods():
+            if valuations[g] >= min_bids[g]:
+                bids[g] = valuations[g]
+        return bids
+
+    # ---------------------------------------------------------
+    # Aggressive: Just JumpBidder.
+    # ---------------------------------------------------------
+    def strategy_aggressive(self):
+        min_bids = self.get_min_bids()
+        valuations = self.get_valuations() 
+        bids = {}
+        for g in valuations: 
+            if valuations[g] > min_bids[g]:
+                bids[g] = random.uniform(min_bids[g], valuations[g])
         return bids
 
     # ---------------------------------------------------------
@@ -139,7 +151,6 @@ class MyAgent(MyLSVMAgent):
         return frontier
 
     def _grow_to_threshold(self, bids, required=5):
-        # TODO: Think about possible improvements
         min_bids = self.get_min_bids()
         adj = self._get_adj() # Form {'A': ['G', 'B'], ...} (sanity-checked)
         
@@ -166,29 +177,110 @@ class MyAgent(MyLSVMAgent):
             else:
                 return bids
 
-    def _connect_comps_national(self, bids):
-        # Extend bundle to ensure components of 9-13 tiles
+    def _grow_comps_national(self, bids):
+        # "Extend bundle to ensure components of 9-13 tiles"
         return self._grow_to_threshold(bids, required=9)
 
-    def _connect_comps_regional(self, bids):
-        # Extend bundle to ensure components of 3-7 tiles
+    def _grow_comps_regional(self, bids):
+        # "Extend bundle to ensure components of 3-7 tiles"
         return self._grow_to_threshold(bids, required=3)
 
     def strategy_expansionist(self):
         bids = self.strategy_conservative()
         if self.is_national_bidder():
-            return self._connect_comps_national(bids)
+            return self._grow_comps_national(bids)
         else:
-            return self._connect_comps_regional(bids)
+            return self._grow_comps_regional(bids)
+
+    # ---------------------------------------------------------
+    # Connector: We identify goods that bridge two disconnected
+    # components and bid on them even if they are a bit pricey.
+    # ---------------------------------------------------------
+    def _connect_comps(self, bids):
+        min_bids = self.get_min_bids()
+        adj = self._get_adj() # Form {'A': ['G', 'B'], ...} (sanity-checked)
+        
+        # Get components in current bundle
+        current = set(bids.keys())
+        comps = self._get_components(current, adj) # Form [{'M', 'G', 'N'}, {'F'}, ...] (sanity-checked)
+
+        # No components to connect
+        if len(comps) < 2:
+            return bids
+
+        # Label goods in bundle
+        good_to_comp = {}
+        for i, comp in enumerate(comps):
+            for g in comp:
+                good_to_comp[g] = i
+
+        for g in self.get_goods():
+            if g in current: continue
+            nb_comp_is = set()
+            for nb in adj[g]:
+                if nb in good_to_comp:
+                    nb_comp_is.add(good_to_comp[nb])
+            # Add any bridging goods to bundle
+            if len(nb_comp_is) >= 2:
+                bids[g] = min_bids[g]
+        return bids
+
+    def strategy_connector(self):
+        bids = self.strategy_conservative()
+        return self._connect_comps(bids)
+
+    # ---------------------------------------------------------
+    # STATES
+    # ---------------------------------------------------------
+    def _f_phase(self):
+        # "Termination point guaranteed to be at least 1000"
+        phase_bins = [10, 100]
+        f_phase = sum(self.get_current_round() > b for b in phase_bins)
+        return f_phase
+
+    def _f_price_ratio(self):
+        # Under how much price pressure are we?
+        total_prices = self.calc_total_prices()
+        total_valuations = self.calc_total_valuation()
+        price_ratio = total_prices / total_valuations if total_valuations > 0 else 0
+        f_price_ratio = 0 if price_ratio < 0.5 else 1
+        return f_price_ratio
+
+    def _f_market_activity(self):
+        # How much have the prices moved since the previous round?
+        price_history = self.get_price_history_map()
+        if len(price_history) > 1:
+            goods = self.get_goods()
+            curr = price_history[-1]
+            prev = price_history[-2]
+            contested = sum(1 for g in goods if curr[g] - prev[g] >= 0.1)
+            contest_bins = [0, 3]
+            f_market_activity = sum(contested > b for b in contest_bins)
+        else:
+            f_market_activity = 0
+        return f_market_activity
+
+    def _encode_fs(self, fs):
+        # Represent all features in a single integer
+        bases = [3, 2, 3] # TODO: Ensure up-to-date
+        idx = 0
+        mult = 1
+        for f, base in zip(fs, bases):
+            idx += f * mult
+            mult *= base
+        return idx
+
+    def determine_state(self):
+        f_phase = self._f_phase()
+        f_price_ratio = self._f_price_ratio()
+        f_market_activity = self._f_market_activity()
+        fs = (f_phase, f_price_ratio, f_market_activity)
+        state = self._encode_fs(fs)
+        return state
 
     # ---------------------------------------------------------
     # LEARNING
     # ---------------------------------------------------------
-    def determine_state(self):
-        curr_state = 0
-        # TODO: Develop states (currently a bandit)
-        return curr_state
-
     def update_rule(self, reward):
         self.q[self.s, self.a] += self.learning_rate * \
             (reward + self.discount_factor *
@@ -213,7 +305,11 @@ class MyAgent(MyLSVMAgent):
             case 0:
                 return self.strategy_conservative()
             case 1:
+                return self.strategy_aggressive()
+            case 2:
                 return self.strategy_expansionist()
+            case 3:
+                return self.strategy_connector()
     
     # ---------------------------------------------------------
     # WRAPPING UP
