@@ -51,7 +51,6 @@ class MyAgent(MyLSVMAgent):
     def setup(self, restarts=20):
         self.my_states = []
         self.training_policy = UniformPolicy(self.num_possible_actions)
-
         if self.save_path_prefix and os.path.isfile(self._get_save_path()):
             with open(self._get_save_path(), 'rb') as saved_q_table:
                 self.q = np.load(saved_q_table)
@@ -62,10 +61,12 @@ class MyAgent(MyLSVMAgent):
             self.q = np.array([[random.uniform(-1, 1)
                                 for _ in range(self.num_possible_actions)]
                                for _ in range(self.num_possible_states)])
-
         # Begin with initial state and random action
         self.a = self.training_policy.get_move(self.s)
         self.s_prime = None
+
+        # The grid is static, so we calculate this once
+        self.adj = self._get_adj() # Form {'A': ['G', 'B'], ...} (sanity-checked)
     
     # ---------------------------------------------------------
     # STRATEGIES
@@ -120,7 +121,7 @@ class MyAgent(MyLSVMAgent):
                     adj[g].append(goods[nr * cols + nc])
         return adj
 
-    def _get_components(self, current, adj):
+    def _get_components(self, current):
         # Components in current bundle ordered from largest to smallest
         seen = set()
         comps = []
@@ -132,7 +133,7 @@ class MyAgent(MyLSVMAgent):
             q = deque([g])
             while q:
                 cur = q.popleft()
-                for nb in adj[cur]:
+                for nb in self.adj[cur]:
                     if nb in current and nb not in seen:
                         seen.add(nb)
                         comp.add(nb)
@@ -141,35 +142,34 @@ class MyAgent(MyLSVMAgent):
         comps.sort(key=lambda c: len(c), reverse=True)
         return comps
 
-    def _get_frontier(self, comp, current, adj):
+    def _get_frontier(self, comp, current):
         # Tiles adjacent to component but not in current bundle
         frontier = set()
         for g in comp:
-            for nb in adj[g]:
+            for nb in self.adj[g]:
                 if nb not in current:
                     frontier.add(nb)
         return frontier
 
     def _grow_to_threshold(self, bids, required=5):
         min_bids = self.get_min_bids()
-        adj = self._get_adj() # Form {'A': ['G', 'B'], ...} (sanity-checked)
         
         # Get components in current bundle
         current = set(bids.keys())
-        comps = self._get_components(current, adj) # Form [{'M', 'G', 'N'}, {'F'}, ...] (sanity-checked)
+        comps = self._get_components(current) # Form [{'M', 'G', 'N'}, {'F'}, ...] (sanity-checked)
 
         # Components already satisfy threshold
         if comps and len(comps[0]) >= required:
             return bids
         
         while True:
-            comps = self._get_components(current, adj)
+            comps = self._get_components(current)
             largest = comps[0] if comps else set()
             # Components now satisfy threshold
             if len(largest) >= required:
                 return bids
             # Else expand largest component by cheapest tile
-            frontier = self._get_frontier(largest, current, adj) if largest else set()
+            frontier = self._get_frontier(largest, current) if largest else set()
             if frontier:
                 cheapest = min(frontier, key=lambda g: min_bids[g])
                 bids[cheapest] = min_bids[cheapest]
@@ -198,11 +198,10 @@ class MyAgent(MyLSVMAgent):
     # ---------------------------------------------------------
     def _connect_comps(self, bids):
         min_bids = self.get_min_bids()
-        adj = self._get_adj() # Form {'A': ['G', 'B'], ...} (sanity-checked)
         
         # Get components in current bundle
         current = set(bids.keys())
-        comps = self._get_components(current, adj) # Form [{'M', 'G', 'N'}, {'F'}, ...] (sanity-checked)
+        comps = self._get_components(current) # Form [{'M', 'G', 'N'}, {'F'}, ...] (sanity-checked)
 
         # No components to connect
         if len(comps) < 2:
@@ -217,7 +216,7 @@ class MyAgent(MyLSVMAgent):
         for g in self.get_goods():
             if g in current: continue
             nb_comp_is = set()
-            for nb in adj[g]:
+            for nb in self.adj[g]:
                 if nb in good_to_comp:
                     nb_comp_is.add(good_to_comp[nb])
             # Add any bridging goods to bundle
@@ -285,9 +284,6 @@ class MyAgent(MyLSVMAgent):
         self.q[self.s, self.a] += self.learning_rate * \
             (reward + self.discount_factor *
              np.max(self.q[self.s_prime]) - self.q[self.s, self.a])
-        if self.save_path_prefix:
-            with open(self._get_save_path(), 'wb') as saved_q_table:
-                np.save(saved_q_table, self.q)
 
     def choose_next_move(self, s_prime):
         # In the next round, your agent will be in state [s_prime]. What move will it play?
@@ -303,13 +299,15 @@ class MyAgent(MyLSVMAgent):
         # TODO: Develop more strategies
         match self.a:
             case 0:
-                return self.strategy_conservative()
+                bids = self.strategy_conservative()
             case 1:
-                return self.strategy_aggressive()
+                bids = self.strategy_aggressive()
             case 2:
-                return self.strategy_expansionist()
+                bids = self.strategy_expansionist()
             case 3:
-                return self.strategy_connector()
+                bids = self.strategy_connector()
+        assert self.is_valid_bid_bundle(bids), "The proposed bid bundle is invalid. Change your strategies."
+        return self.clip_bids(bids)
     
     # ---------------------------------------------------------
     # WRAPPING UP
@@ -323,7 +321,10 @@ class MyAgent(MyLSVMAgent):
         self.s_prime = None 
 
     def teardown(self):
-        pass
+        # Only save here to boost performance
+        if self.save_path_prefix:
+            with open(self._get_save_path(), 'wb') as saved_q_table:
+                np.save(saved_q_table, self.q)
 
 ################### SUBMISSION #####################
 my_agent_submission = MyAgent(NAME)
