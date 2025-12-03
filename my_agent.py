@@ -16,14 +16,14 @@ from uniform_policy import UniformPolicy
 
 
 NAME = "mulberry"
-NUM_POSSIBLE_STATES = 18
+NUM_POSSIBLE_STATES = 144
 NUM_POSSIBLE_ACTIONS = 4
 INITIAL_STATE = 0
 LEARNING_RATE = 0.05
 DISCOUNT_FACTOR = 0.90
 EXPLORATION_RATE = 0.05
 TRAINING_MODE = False
-SAVE_PATH_PREFIX = "qtable"
+SAVE_PATH_PREFIX = "qtab1"
 
 class MyAgent(MyLSVMAgent):
     def __init__(self, name,
@@ -179,11 +179,11 @@ class MyAgent(MyLSVMAgent):
 
     def _grow_comps_national(self, bids):
         # "Extend bundle to ensure components of 9-13 tiles"
-        return self._grow_to_threshold(bids, required=9)
+        return self._grow_to_threshold(bids, required=12)
 
     def _grow_comps_regional(self, bids):
         # "Extend bundle to ensure components of 3-7 tiles"
-        return self._grow_to_threshold(bids, required=3)
+        return self._grow_to_threshold(bids, required=6)
 
     def strategy_expansionist(self):
         bids = self.strategy_conservative()
@@ -234,34 +234,71 @@ class MyAgent(MyLSVMAgent):
     def _f_phase(self):
         # "Termination point guaranteed to be at least 1000"
         phase_bins = [10, 100]
-        f_phase = sum(self.get_current_round() > b for b in phase_bins)
-        return f_phase
+        return sum(self.get_current_round() > b for b in phase_bins)
+
+    def _f_market_activity(self):
+        # How much have the prices moved since the previous round?
+        price_history = self.get_price_history_map()
+
+        # No activity yet
+        if len(price_history) < 2:
+            return 0
+
+        # Bin activity to prevent combinatorial explosion
+        goods = self.get_goods()
+        curr, prev = price_history[-1], price_history[-2]
+        contest_bins = [0]
+        contested = sum(1 for g in goods if curr[g] - prev[g] >= 0.1)
+        return sum(contested > b for b in contest_bins)
+
+    def _f_hottest_region(self):
+        # Which region has the most activity?
+        price_history = self.get_price_history_map()
+
+        # No activity yet
+        if len(price_history) < 2:
+            return 1 # Default to centre
+
+        # Specific to our particular grid shape
+        rows, cols = self.get_shape()
+        regions = [
+            [r*cols + c for r in range(rows) for c in range(0, 2)], # Left
+            [r*cols + c for r in range(rows) for c in range(2, 4)], # Center
+            [r*cols + c for r in range(rows) for c in range(4, 6)]  # Right
+        ]
+
+        # Changes are non-negative
+        goods = sorted(list(self.get_goods())) # This allows us to do modular logic
+        curr, prev = price_history[-1], price_history[-2]
+        deltas = []
+        for region in regions:
+            delta = sum(curr[goods[idx]] - prev[goods[idx]] for idx in region)
+            deltas.append(delta)
+        return np.argmax(deltas)
+
+    def _f_competition(self):
+        # How many unique winners were there?
+        unique_winners = np.unique(self.get_previous_winners())
+        competition_bins = [2]
+        return sum(len(unique_winners) > b for b in competition_bins)
+
+    def _f_allocation_size(self):
+        # How much are we tentatively holding onto?
+        tentative_allocation = self.get_tentative_allocation()
+        allocation_bins = [5]
+        return sum(len(tentative_allocation) > b for b in allocation_bins)
 
     def _f_price_ratio(self):
         # Under how much price pressure are we?
         total_prices = self.calc_total_prices()
         total_valuations = self.calc_total_valuation()
         price_ratio = total_prices / total_valuations if total_valuations > 0 else 0
-        f_price_ratio = 0 if price_ratio < 0.5 else 1
-        return f_price_ratio
-
-    def _f_market_activity(self):
-        # How much have the prices moved since the previous round?
-        price_history = self.get_price_history_map()
-        if len(price_history) > 1:
-            goods = self.get_goods()
-            curr = price_history[-1]
-            prev = price_history[-2]
-            contested = sum(1 for g in goods if curr[g] - prev[g] >= 0.1)
-            contest_bins = [0, 3]
-            f_market_activity = sum(contested > b for b in contest_bins)
-        else:
-            f_market_activity = 0
-        return f_market_activity
+        price_ratio_bins = [0.5]
+        return sum(price_ratio > b for b in price_ratio_bins)
 
     def _encode_fs(self, fs):
         # Represent all features in a single integer
-        bases = [3, 2, 3] # TODO: Ensure up-to-date
+        bases = [3, 2, 3, 2, 2, 2] # 144 states
         idx = 0
         mult = 1
         for f, base in zip(fs, bases):
@@ -270,12 +307,16 @@ class MyAgent(MyLSVMAgent):
         return idx
 
     def determine_state(self):
-        f_phase = self._f_phase()
-        f_price_ratio = self._f_price_ratio()
-        f_market_activity = self._f_market_activity()
-        fs = (f_phase, f_price_ratio, f_market_activity)
-        state = self._encode_fs(fs)
-        return state
+        # Encode all features into a single integer
+        fs = (
+            self._f_phase(),
+            self._f_market_activity(),
+            self._f_hottest_region(),
+            self._f_competition(),
+            self._f_allocation_size(),
+            self._f_price_ratio()
+        )
+        return self._encode_fs(fs)
 
     # ---------------------------------------------------------
     # LEARNING
@@ -296,7 +337,7 @@ class MyAgent(MyLSVMAgent):
     # BIDDING
     # ---------------------------------------------------------
     def get_bids(self):
-        # TODO: Develop more strategies
+        # TODO: Strategies "emphasize this region" for each of the three regions
         match self.a:
             case 0:
                 bids = self.strategy_conservative()
