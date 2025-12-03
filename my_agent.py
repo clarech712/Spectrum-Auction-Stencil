@@ -17,13 +17,13 @@ from uniform_policy import UniformPolicy
 
 NAME = "mulberry"
 NUM_POSSIBLE_STATES = 144
-NUM_POSSIBLE_ACTIONS = 4
+NUM_POSSIBLE_ACTIONS = 7
 INITIAL_STATE = 0
 LEARNING_RATE = 0.05
 DISCOUNT_FACTOR = 0.90
 EXPLORATION_RATE = 0.05
 TRAINING_MODE = False
-SAVE_PATH_PREFIX = "qtab1"
+SAVE_PATH_PREFIX = "qtab2"
 
 class MyAgent(MyLSVMAgent):
     def __init__(self, name,
@@ -96,7 +96,7 @@ class MyAgent(MyLSVMAgent):
     # ---------------------------------------------------------
     def strategy_aggressive(self):
         min_bids = self.get_min_bids()
-        valuations = self.get_valuations() 
+        valuations = self.get_valuations()
         bids = {}
         for g in valuations: 
             if valuations[g] > min_bids[g]:
@@ -229,6 +229,37 @@ class MyAgent(MyLSVMAgent):
         return self._connect_comps(bids)
 
     # ---------------------------------------------------------
+    # Focused: We prioritize maintaining components in specific
+    # zones of the grid.
+    # ---------------------------------------------------------
+    def _get_indices(self):
+        # Specific to our particular grid shape
+        rows, cols = self.get_shape()
+        indices = [
+            [r*cols + c for r in range(rows) for c in range(0, 2)], # Left
+            [r*cols + c for r in range(rows) for c in range(2, 4)], # Center
+            [r*cols + c for r in range(rows) for c in range(4, 6)]  # Right
+        ]
+        return indices
+
+    def strategy_focused(self, region):
+        bids = self.strategy_conservative()
+
+        # Which goods are we targetting?
+        goods = sorted(list(self.get_goods())) # This allows us to do modular logic
+        region_indices = self._get_indices()[region]
+        target_goods = {goods[idx] for idx in region_indices}
+
+        # Only bid if good is not too expensive
+        min_bids = self.get_min_bids()
+        valuations = self.get_valuations()
+        tentative_alloc = self.get_tentative_allocation()
+        for g in target_goods:
+            if g not in bids and min_bids[g] / valuations[g] < 1.1:
+                bids[g] = min_bids[g]
+        return bids
+
+    # ---------------------------------------------------------
     # STATES
     # ---------------------------------------------------------
     def _f_phase(self):
@@ -259,20 +290,12 @@ class MyAgent(MyLSVMAgent):
         if len(price_history) < 2:
             return 1 # Default to centre
 
-        # Specific to our particular grid shape
-        rows, cols = self.get_shape()
-        regions = [
-            [r*cols + c for r in range(rows) for c in range(0, 2)], # Left
-            [r*cols + c for r in range(rows) for c in range(2, 4)], # Center
-            [r*cols + c for r in range(rows) for c in range(4, 6)]  # Right
-        ]
-
         # Changes are non-negative
         goods = sorted(list(self.get_goods())) # This allows us to do modular logic
         curr, prev = price_history[-1], price_history[-2]
         deltas = []
-        for region in regions:
-            delta = sum(curr[goods[idx]] - prev[goods[idx]] for idx in region)
+        for region_indices in self._get_indices():
+            delta = sum(curr[goods[idx]] - prev[goods[idx]] for idx in region_indices)
             deltas.append(delta)
         return np.argmax(deltas)
 
@@ -284,9 +307,9 @@ class MyAgent(MyLSVMAgent):
 
     def _f_allocation_size(self):
         # How much are we tentatively holding onto?
-        tentative_allocation = self.get_tentative_allocation()
-        allocation_bins = [5]
-        return sum(len(tentative_allocation) > b for b in allocation_bins)
+        tentative_alloc = self.get_tentative_allocation()
+        alloc_bins = [5]
+        return sum(len(tentative_alloc) > b for b in alloc_bins)
 
     def _f_price_ratio(self):
         # Under how much price pressure are we?
@@ -337,16 +360,15 @@ class MyAgent(MyLSVMAgent):
     # BIDDING
     # ---------------------------------------------------------
     def get_bids(self):
-        # TODO: Strategies "emphasize this region" for each of the three regions
+        # Map actions to strategies
         match self.a:
-            case 0:
-                bids = self.strategy_conservative()
-            case 1:
-                bids = self.strategy_aggressive()
-            case 2:
-                bids = self.strategy_expansionist()
-            case 3:
-                bids = self.strategy_connector()
+            case 0: bids = self.strategy_conservative()
+            case 1: bids = self.strategy_aggressive()
+            case 2: bids = self.strategy_expansionist()
+            case 3: bids = self.strategy_connector()
+            case 4: bids = self.strategy_focused(0)
+            case 5: bids = self.strategy_focused(1)
+            case 6: bids = self.strategy_focused(2)
         assert self.is_valid_bid_bundle(bids), "The proposed bid bundle is invalid. Change your strategies."
         return self.clip_bids(bids)
     
