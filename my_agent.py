@@ -301,7 +301,9 @@ class MyAgent(MyLSVMAgent):
 
     def _f_competition(self):
         # How many unique winners were there?
-        unique_winners = np.unique(self.get_previous_winners())
+        # TODO: Find out what in the arena code causes the below exception
+        try: unique_winners = np.unique(self.get_previous_winners())
+        except: unique_winners = []
         competition_bins = [2]
         return sum(len(unique_winners) > b for b in competition_bins)
 
