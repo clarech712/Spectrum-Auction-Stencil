@@ -21,9 +21,9 @@ NUM_POSSIBLE_ACTIONS = 7
 INITIAL_STATE = 0
 LEARNING_RATE = 0.05
 DISCOUNT_FACTOR = 0.90
-EXPLORATION_RATE = 0.05
+EXPLORATION_RATE = 0.1
 TRAINING_MODE = False
-SAVE_PATH_PREFIX = "qtab2"
+SAVE_PATH_PREFIX = "qtab3"
 
 class MyAgent(MyLSVMAgent):
     def __init__(self, name,
@@ -88,7 +88,7 @@ class MyAgent(MyLSVMAgent):
         bids = {} 
         for g in self.get_goods():
             if valuations[g] >= min_bids[g]:
-                bids[g] = valuations[g]
+                bids[g] = min_bids[g]
         return bids
 
     # ---------------------------------------------------------
@@ -198,6 +198,7 @@ class MyAgent(MyLSVMAgent):
     # ---------------------------------------------------------
     def _connect_comps(self, bids):
         min_bids = self.get_min_bids()
+        valuations = self.get_valuations() 
         
         # Get components in current bundle
         current = set(bids.keys())
@@ -220,7 +221,7 @@ class MyAgent(MyLSVMAgent):
                 if nb in good_to_comp:
                     nb_comp_is.add(good_to_comp[nb])
             # Add any bridging goods to bundle
-            if len(nb_comp_is) >= 2:
+            if len(nb_comp_is) >= 2 and min_bids[g] / valuations[g] < 1.5: # TODO: Should this be more lenient?
                 bids[g] = min_bids[g]
         return bids
 
@@ -255,7 +256,7 @@ class MyAgent(MyLSVMAgent):
         valuations = self.get_valuations()
         tentative_alloc = self.get_tentative_allocation()
         for g in target_goods:
-            if g not in bids and min_bids[g] / valuations[g] < 1.1:
+            if g not in bids and min_bids[g] / valuations[g] < 1.5: # TODO: Should this be more lenient?
                 bids[g] = min_bids[g]
         return bids
 
@@ -297,14 +298,14 @@ class MyAgent(MyLSVMAgent):
         for region_indices in self._get_indices():
             delta = sum(curr[goods[idx]] - prev[goods[idx]] for idx in region_indices)
             deltas.append(delta)
-        return np.argmax(deltas)
+        return np.argmax(deltas) # TODO: Tie-breaking
 
     def _f_competition(self):
         # How many unique winners were there?
         # TODO: Find out what in the arena code causes the below exception
         try: unique_winners = np.unique(self.get_previous_winners())
         except: unique_winners = []
-        competition_bins = [2]
+        competition_bins = [2] # TODO: Should we change this to one?
         return sum(len(unique_winners) > b for b in competition_bins)
 
     def _f_allocation_size(self):
