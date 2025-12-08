@@ -3,27 +3,29 @@ from agt_server.local_games.lsvm_arena import LSVMArena
 from agt_server.agents.test_agents.lsvm.min_bidder.my_agent import MinBidAgent
 from agt_server.agents.test_agents.lsvm.jump_bidder.jump_bidder import JumpBidder
 from agt_server.agents.test_agents.lsvm.truthful_bidder.my_agent import TruthfulBidder
+from path_utils import path_from_local_root
+from uniform_policy import UniformPolicy
+
 import time
 import os
 import random
 import gzip
 import json
-from path_utils import path_from_local_root
+from collections import deque
 
 import numpy as np
-from collections import deque
-from uniform_policy import UniformPolicy
-
+import matplotlib.pyplot as plt
 
 NAME = "mulberry"
-NUM_POSSIBLE_STATES = 144
-NUM_POSSIBLE_ACTIONS = 7
+NUM_POSSIBLE_STATES = 216
+NUM_POSSIBLE_ACTIONS = 8
 INITIAL_STATE = 0
-LEARNING_RATE = 0.05
-DISCOUNT_FACTOR = 0.90
-EXPLORATION_RATE = 0.1
-TRAINING_MODE = False
-SAVE_PATH_PREFIX = "qtab3"
+LEARNING_RATE = 0.1
+DISCOUNT_FACTOR = 0.75
+EXPLORATION_RATE = 0.2
+TRAINING_MODE = True
+SAVE_PATH_PREFIX = "q_table"
+TIMESTAMP = time.strftime('%Y%m%d_%H%M%S')
 
 class MyAgent(MyLSVMAgent):
     def __init__(self, name,
@@ -41,14 +43,23 @@ class MyAgent(MyLSVMAgent):
         self.training_mode = training_mode
         self.save_path_prefix = save_path_prefix
         self.s = initial_state
+        self._reset_reward_tracker()
         super().__init__(name)
+
+    def _reset_reward_tracker(self):
+        # Allow tracker reset externally (ugly but it'll have to do)
+        self.round_rewards = []
+        self.auction_rewards = []
+        self.auction_utility = []
+        self.current_auction_reward = 0
 
     def _get_save_path(self):
         # Separate Q-tables for national and regional bidder
-        save_path_suffix = "_nat" if self.is_national_bidder() else "_reg"
-        return self.save_path_prefix + save_path_suffix + ".npy"
+        return self.save_path_prefix + self.save_path_suffix + ".npy"
     
     def setup(self, restarts=20):
+        # Set up separate Q-learning apparatus for national and regional bidders
+        self.save_path_suffix = "_nat" if self.is_national_bidder() else "_reg"
         self.my_states = []
         self.training_policy = UniformPolicy(self.num_possible_actions)
         if self.save_path_prefix and os.path.isfile(self._get_save_path()):
@@ -65,9 +76,9 @@ class MyAgent(MyLSVMAgent):
         self.a = self.training_policy.get_move(self.s)
         self.s_prime = None
 
-        # The grid is static, so we calculate this once
+        # The grid is static so we calculate this once
         self.adj = self._get_adj() # Form {'A': ['G', 'B'], ...} (sanity-checked)
-    
+
     # ---------------------------------------------------------
     # STRATEGIES
     # We have a grid of goods as follows:
@@ -94,13 +105,13 @@ class MyAgent(MyLSVMAgent):
     # ---------------------------------------------------------
     # Aggressive: Just JumpBidder.
     # ---------------------------------------------------------
-    def strategy_aggressive(self):
+    def strategy_aggressive(self, strength=0):
         min_bids = self.get_min_bids()
         valuations = self.get_valuations()
         bids = {}
         for g in valuations: 
             if valuations[g] > min_bids[g]:
-                bids[g] = random.uniform(min_bids[g], valuations[g])
+                bids[g] = min_bids[g] + ((strength + 1) * 0.4 * (valuations[g] - min_bids[g]))
         return bids
 
     # ---------------------------------------------------------
@@ -198,7 +209,6 @@ class MyAgent(MyLSVMAgent):
     # ---------------------------------------------------------
     def _connect_comps(self, bids):
         min_bids = self.get_min_bids()
-        valuations = self.get_valuations() 
         
         # Get components in current bundle
         current = set(bids.keys())
@@ -221,7 +231,7 @@ class MyAgent(MyLSVMAgent):
                 if nb in good_to_comp:
                     nb_comp_is.add(good_to_comp[nb])
             # Add any bridging goods to bundle
-            if len(nb_comp_is) >= 2 and min_bids[g] / valuations[g] < 1.5: # TODO: Should this be more lenient?
+            if len(nb_comp_is) >= 2:
                 bids[g] = min_bids[g]
         return bids
 
@@ -254,9 +264,8 @@ class MyAgent(MyLSVMAgent):
         # Only bid if good is not too expensive
         min_bids = self.get_min_bids()
         valuations = self.get_valuations()
-        tentative_alloc = self.get_tentative_allocation()
         for g in target_goods:
-            if g not in bids and min_bids[g] / valuations[g] < 1.5: # TODO: Should this be more lenient?
+            if g not in bids and min_bids[g] / (valuations[g] + 0.01) < 2.5:
                 bids[g] = min_bids[g]
         return bids
 
@@ -279,7 +288,7 @@ class MyAgent(MyLSVMAgent):
         # Bin activity to prevent combinatorial explosion
         goods = self.get_goods()
         curr, prev = price_history[-1], price_history[-2]
-        contest_bins = [0]
+        contest_bins = [2]
         contested = sum(1 for g in goods if curr[g] - prev[g] >= 0.1)
         return sum(contested > b for b in contest_bins)
 
@@ -298,20 +307,27 @@ class MyAgent(MyLSVMAgent):
         for region_indices in self._get_indices():
             delta = sum(curr[goods[idx]] - prev[goods[idx]] for idx in region_indices)
             deltas.append(delta)
-        return np.argmax(deltas) # TODO: Tie-breaking
 
-    def _f_competition(self):
-        # How many unique winners were there?
-        # TODO: Find out what in the arena code causes the below exception
-        try: unique_winners = np.unique(self.get_previous_winners())
-        except: unique_winners = []
-        competition_bins = [2] # TODO: Should we change this to one?
-        return sum(len(unique_winners) > b for b in competition_bins)
+        # Break ties randomly
+        max_val = np.max(deltas)
+        candidates = np.flatnonzero(np.array(deltas) == max_val)
+        return np.random.choice(candidates)
+
+    def _f_region(self):
+        # Which region is mine?
+        regional_good = self.get_regional_good()
+        if regional_good is not None:
+            goods = sorted(list(self.get_goods())) # This allows us to do modular logic
+            for region, region_indices in enumerate(self._get_indices()):
+                for idx in region_indices:
+                    if goods[idx] == regional_good:
+                        return region
+        return 1 # Default to centre
 
     def _f_allocation_size(self):
         # How much are we tentatively holding onto?
         tentative_alloc = self.get_tentative_allocation()
-        alloc_bins = [5]
+        alloc_bins = [4]
         return sum(len(tentative_alloc) > b for b in alloc_bins)
 
     def _f_price_ratio(self):
@@ -324,7 +340,7 @@ class MyAgent(MyLSVMAgent):
 
     def _encode_fs(self, fs):
         # Represent all features in a single integer
-        bases = [3, 2, 3, 2, 2, 2] # 144 states
+        bases = [3, 2, 3, 3, 2, 2] # 216 states
         idx = 0
         mult = 1
         for f, base in zip(fs, bases):
@@ -338,7 +354,7 @@ class MyAgent(MyLSVMAgent):
             self._f_phase(),
             self._f_market_activity(),
             self._f_hottest_region(),
-            self._f_competition(),
+            self._f_region(),
             self._f_allocation_size(),
             self._f_price_ratio()
         )
@@ -359,6 +375,13 @@ class MyAgent(MyLSVMAgent):
         else:
             return np.argmax(self.q[s_prime])
     
+    def calculate_reward(self):
+        # Change in utility per round (when update is called, previous_util has been updated)
+        util_history = self.get_previous_util()
+        if len(util_history) >= 2:
+            return util_history[-1] - util_history[-2]
+        return util_history[-1]
+
     # ---------------------------------------------------------
     # BIDDING
     # ---------------------------------------------------------
@@ -366,27 +389,38 @@ class MyAgent(MyLSVMAgent):
         # Map actions to strategies
         match self.a:
             case 0: bids = self.strategy_conservative()
-            case 1: bids = self.strategy_aggressive()
-            case 2: bids = self.strategy_expansionist()
-            case 3: bids = self.strategy_connector()
-            case 4: bids = self.strategy_focused(0)
-            case 5: bids = self.strategy_focused(1)
-            case 6: bids = self.strategy_focused(2)
+            case 1: bids = self.strategy_aggressive(0)
+            case 2: bids = self.strategy_aggressive(1)
+            case 3: bids = self.strategy_expansionist()
+            case 4: bids = self.strategy_connector()
+            case 5: bids = self.strategy_focused(0)
+            case 6: bids = self.strategy_focused(1)
+            case 7: bids = self.strategy_focused(2)
         assert self.is_valid_bid_bundle(bids), "The proposed bid bundle is invalid. Change your strategies."
-        return self.clip_bids(bids)
+        return bids
     
     # ---------------------------------------------------------
     # WRAPPING UP
     # ---------------------------------------------------------
     def update(self):
+        # Calculate and track reward
+        reward = self.calculate_reward()
+        self.round_rewards.append(reward)
+        self.current_auction_reward += reward
+
+        # Q-learning update and state transition
         self.s_prime = self.determine_state()
-        previous_util = self.get_previous_util()[-1] # Given its tentative allocation in the previous round of the auction
-        self.update_rule(previous_util)
-        self.s = self.s_prime
+        self.update_rule(reward)
         self.a = self.choose_next_move(self.s_prime)
+        self.s = self.s_prime
         self.s_prime = None 
 
     def teardown(self):
+        # Track auction reward
+        self.auction_utility.append(self.calc_total_utility())
+        self.auction_rewards.append(self.current_auction_reward)
+        self.current_auction_reward = 0
+
         # Only save here to boost performance
         if self.save_path_prefix:
             with open(self._get_save_path(), 'wb') as saved_q_table:
@@ -396,62 +430,235 @@ class MyAgent(MyLSVMAgent):
 my_agent_submission = MyAgent(NAME)
 ####################################################
 
+# ---------------------------------------------------------
+# PROCESSING
+# ---------------------------------------------------------
+class Processor:
+    def __init__(self):
+        pass
 
-def process_saved_game(filepath): 
-    """ 
-    Here is some example code to load in a saved game in the format of a json.gz and to work with it
-    """
-    print(f"Processing: {filepath}")
-    
-    # NOTE: Data is a dictionary mapping 
-    with gzip.open(filepath, 'rt', encoding='UTF-8') as f:
-        game_data = json.load(f)
-        for agent, agent_data in game_data.items(): 
-            if agent_data['valuations'] is not None: 
-                # agent is the name of the agent whose data is being processed 
-                agent = agent 
-                
-                # bid_history is the bidding history of the agent as a list of maps from good to bid
-                bid_history = agent_data['bid_history']
-                
-                # price_history is the price history of the agent as a list of maps from good to price
-                price_history = agent_data['price_history']
-                
-                # util_history is the history of the agent's previous utilities 
-                util_history = agent_data['util_history']
-                
-                # util_history is the history of the previous tentative winners of all goods as a list of maps from good to winner
-                winner_history = agent_data['winner_history']
-                
-                # elo is the agent's elo as a string
-                elo = agent_data['elo']
-                
-                # is_national_bidder is a boolean indicating whether or not the agent is a national bidder in this game 
-                is_national_bidder = agent_data['is_national_bidder']
-                
-                # valuations is the valuations the agent recieved for each good as a map from good to valuation
-                valuations = agent_data['valuations']
-                
-                # regional_good is the regional good assigned to the agent 
-                # This is None in the case that the bidder is a national bidder 
-                regional_good = agent_data['regional_good']
-            
-            # TODO: If you are planning on learning from previously saved games enter your code below. 
-            
-            
+    @staticmethod
+    def process_saved_game(filepath): 
+        # Here is some example code to load in a saved game in the format of a json.gz and to work with it
+        print(f"Processing: {filepath}")
         
-def process_saved_dir(dirpath): 
-    """ 
-     Here is some example code to load in all saved game in the format of a json.gz in a directory and to work with it
-    """
-    for filename in os.listdir(dirpath):
-        if filename.endswith('.json.gz'):
-            filepath = os.path.join(dirpath, filename)
-            process_saved_game(filepath)
+        # NOTE: Data is a dictionary mapping 
+        with gzip.open(filepath, 'rt', encoding='UTF-8') as f:
+            game_data = json.load(f)
+            for agent, agent_data in game_data.items(): 
+                if agent_data['valuations'] is not None: 
+                    # agent is the name of the agent whose data is being processed 
+                    agent = agent 
+                    
+                    # bid_history is the bidding history of the agent as a list of maps from good to bid
+                    bid_history = agent_data['bid_history']
+                    
+                    # price_history is the price history of the agent as a list of maps from good to price
+                    price_history = agent_data['price_history']
+                    
+                    # util_history is the history of the agent's previous utilities 
+                    util_history = agent_data['util_history']
+                    
+                    # util_history is the history of the previous tentative winners of all goods as a list of maps from good to winner
+                    winner_history = agent_data['winner_history']
+                    
+                    # elo is the agent's elo as a string
+                    elo = agent_data['elo']
+                    
+                    # is_national_bidder is a boolean indicating whether or not the agent is a national bidder in this game 
+                    is_national_bidder = agent_data['is_national_bidder']
+                    
+                    # valuations is the valuations the agent recieved for each good as a map from good to valuation
+                    valuations = agent_data['valuations']
+                    
+                    # regional_good is the regional good assigned to the agent 
+                    # This is None in the case that the bidder is a national bidder 
+                    regional_good = agent_data['regional_good']
+                
+                # TODO: If you are planning on learning from previously saved games enter your code below. 
+
+    @staticmethod
+    def process_saved_dir(dirpath): 
+        # Here is some example code to load in all saved game in the format of a json.gz in a directory and to work with it
+        for filename in os.listdir(dirpath):
+            if filename.endswith('.json.gz'):
+                filepath = os.path.join(dirpath, filename)
+                Processor.process_saved_game(filepath)
+
+# ---------------------------------------------------------
+# TRAINING
+# ---------------------------------------------------------
+class Trainer:
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def _plot_learning_curve(ys, xlabel, ylabel, title, fname):
+        # Visualise non-smoothed
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.plot(ys, alpha=0.6, linewidth=1, label="raw")
+
+        # Use smoothing of 50 if enough data
+        window = 100
+        if len(ys) >= window:
+            kernel = np.ones(window) / window
+            ys_smooth = np.convolve(ys, kernel, mode="same")
+            ax.plot(ys_smooth, alpha=0.8, linewidth=1, label="smoothed")
+
+        # Annotate and save
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(f"fig/{TIMESTAMP}_{fname}.png", dpi=300, bbox_inches="tight")
+        print(f"Saved fig/{TIMESTAMP}_{fname}.png")
+
+    @staticmethod
+    def _plot_learning_curves(agent, num_cycles_per_player, phase=0):
+        # Per-auction utility
+        auction_utility = np.array(agent.auction_utility)
+        Trainer._plot_learning_curve(auction_utility, "Auction", "Reward",
+                                     f"Utility per auction across {num_cycles_per_player} cycles", f"{phase}_auction_utility")
+
+        # Per-auction cumulative reward
+        auction_rewards = np.array(agent.auction_rewards)
+        Trainer._plot_learning_curve(auction_rewards, "Auction", "Reward",
+                                     f"Reward per auction across {num_cycles_per_player} cycles", f"{phase}_auction_rewards")
+
+        # Per-round reward
+        round_rewards = np.array(agent.round_rewards)
+        Trainer._plot_learning_curve(round_rewards, "Round", "Reward",
+                                     f"Reward per round across {num_cycles_per_player} cycles", f"{phase}_round_rewards")
+
+    @staticmethod
+    def _print_policy_change(initial_policy, final_policy, phase=0):
+        # Calculate and log policy changes
+        policy_change = np.sum(initial_policy != final_policy)
+        change_percentage = (policy_change / NUM_POSSIBLE_STATES) * 100
+        
+        # Which strategies changed most?
+        changed_from = initial_policy[initial_policy != final_policy]
+        changed_to = final_policy[initial_policy != final_policy]
+        
+        # Save to plaintext file
+        with open(f"log/{TIMESTAMP}_policy_changes.txt", 'a') as f:
+            f.write(f"=== Phase {phase} ===\n")
+            f.write(f"Policy changes: {policy_change}/{NUM_POSSIBLE_STATES} ({change_percentage:.1f}%)\n")
+            f.write(f"Change distribution:\n")
             
+            # Track transitions between strategies
+            if len(changed_from) > 0:
+                transition_counts = {}
+                for i, j in zip(changed_from, changed_to):
+                    transition_counts[(i, j)] = transition_counts.get((i, j), 0) + 1
+                
+                # Write top 5 transitions
+                for (from_s, to_s), count in sorted(transition_counts.items(), key=lambda x: x[1], reverse=True)[:5]:
+                    strategies = ["Conservative", "Aggressive0", "Aggressive1", "Expansionist", 
+                                  "Connector", "FocusedL", "FocusedC", "FocusedR"]
+                    f.write(f"  {strategies[from_s]} > {strategies[to_s]}: {count} states\n")
+            f.write("\n")
+
+    @staticmethod
+    def _print_q_change(initial_q, final_q, phase=0):
+        # Calculate and log Q-table changes
+        q_change = np.mean(np.abs(final_q - initial_q))
+        q_improvement = np.mean(final_q - initial_q)  # Positive if improving
+        
+        # Calculate state-level statistics
+        state_improvements = np.mean(final_q - initial_q, axis=1)
+        improving_states = np.sum(state_improvements > 0)
+
+        # Save to plaintext file
+        with open(f"log/{TIMESTAMP}_q_changes.txt", 'a') as f:
+            f.write(f"=== Phase {phase} ===\n")
+            f.write(f"Average absolute Q-change: {q_change:.4f}\n")
+            f.write(f"Average Q-improvement: {q_improvement:.4f}\n")
+            f.write(f"States with Q-improvement: {improving_states}/{initial_q.shape[0]}\n")
+            f.write(f"Q-value spread (final_q): {np.max(final_q) - np.min(final_q):.3f}\n")
+            
+            # Top five states with biggest improvement
+            if improving_states > 0:
+                top_improvements = np.argsort(state_improvements)[-5:][::-1]
+                f.write("Top improving states:\n")
+                for state in top_improvements:
+                    f.write(f"  State {state}: +{state_improvements[state]:.3f}\n")
+            f.write("\n")
+
+    @staticmethod
+    def run():
+        # Run training and generate learning curves
+        # 0. Create arena with one learner and everybody else fixed
+        agent = MyAgent("MyAgent", training_mode=True)
+        # Instead of mixed opponents, create a curriculum
+        opponents_list = [
+            # Phase 1. MinBidder
+            (15, [MinBidAgent(f"MinBidder{i}") for i in range(5)]),
+
+            # Phase 2. MinBidder + JumpBidder
+            (15, [MinBidAgent(f"MinBidder{i}") for i in range(2)]
+            + [JumpBidder(f"JumpBidder{i}") for i in range(3)]),
+            
+            # Phase 3. MinBidder + JumpBidder + TruthfulBidder
+            (25, [MinBidAgent(f"MinBidder{i}") for i in range(1)]
+            + [JumpBidder(f"JumpBidder{i}") for i in range(2)]
+            + [TruthfulBidder(f"TruthfulBidder{i}") for i in range(2)]),
+            
+            # Phase 4. Self-play
+            (100, [MyAgent(f"MyAgent{i}", training_mode=False) for i in range(5)]),
+
+            # Phase 5: All hiccups break loose
+            (100, [MyAgent(f"MyAgent{i}", training_mode=False) for i in range(2)]
+            + [MinBidAgent("MinBidder1"), JumpBidder("JumpBidder1"), TruthfulBidder("TruthfulBidder1")])
+        ]
+
+        # 1. Initialize Q-table
+        arena = LSVMArena(
+            num_cycles_per_player=1,
+            players=[agent] + [MinBidAgent(f"MinBidder{i}") for i in range(6)]
+        )
+        arena.run()
+        q_0 = agent.q.copy()
+        policy_0 = np.argmax(q_0, axis=1)
+
+        # 2. Train in phases
+        for phase, (num_cycles, opponents) in enumerate(opponents_list):
+            print(f"\n=== Training Phase {phase+1} ===")
+            # Train against current opponents
+            arena = LSVMArena(
+                num_cycles_per_player=num_cycles,
+                players=[agent] + opponents
+            )
+            arena.run()
+
+            # Compare Q-tables and policies
+            q_1 = agent.q.copy()
+            policy_1 = np.argmax(q_1, axis=1)
+            Trainer._print_q_change(q_0, q_1, phase)
+            Trainer._print_policy_change(policy_0, policy_1, phase)
+
+            # Plot learning curves
+            Trainer._plot_learning_curves(agent, num_cycles, phase)
+            agent._reset_reward_tracker() # So that the curves are fresh next phase
+
+        # This is our final agent
+        return agent
 
 if __name__ == "__main__":
-    
+    # Train agent against fixed opponents
+    trained_agent = Trainer.run()
+
+    # Test agent against fixed opponents
+    arena = LSVMArena(
+        num_cycles_per_player=3,
+        timeout=1,
+        players=[MyAgent(f"MyAgent{i}", training_mode=False) for i in range(4)]
+                + [MinBidAgent("MinBidder1"), JumpBidder("JumpBidder1"), TruthfulBidder("TruthfulBidder1")]
+    )
+    arena.run()
+    exit()
     # Heres an example of how to process a singular file 
     # process_saved_game(path_from_local_root("saved_games/2024-04-08_17-36-34.json.gz"))
     # or every file in a directory 
