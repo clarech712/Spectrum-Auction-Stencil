@@ -105,18 +105,12 @@ class Diagnostics:
         arena = LSVMArena(
             num_cycles_per_player=num_cycles,
             timeout=1,
-            players=[
-                diagnostic_agent,
-                MyAgent("MyAgent1", training_mode=False),
-                MyAgent("MyAgent2", training_mode=False),
-                MyAgent("MyAgent3", training_mode=False),
-                MinBidAgent("MinBidder1"), 
-                JumpBidder("JumpBidder1"), 
-                TruthfulBidder("TruthfulBidder1"),
-            ]
+            players=[diagnostic_agent]
+                    + [MyAgent(f"MyAgent{i}", training_mode=False) for i in range(3)]
+                    + [MinBidAgent("MinBidder1"), JumpBidder("JumpBidder1"), TruthfulBidder("TruthfulBidder1")]
         )
         arena.run()
-        
+
         # Save feature analysis
         diagnostic_agent.print_feature_stats(filepath=filepath)
 

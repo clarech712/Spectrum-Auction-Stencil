@@ -23,8 +23,8 @@ INITIAL_STATE = 0
 LEARNING_RATE = 0.1
 DISCOUNT_FACTOR = 0.75
 EXPLORATION_RATE = 0.2
-TRAINING_MODE = True
-SAVE_PATH_PREFIX = "q_table"
+TRAINING_MODE = False
+SAVE_PATH_PREFIX = "q_table7"
 TIMESTAMP = time.strftime('%Y%m%d_%H%M%S')
 
 class MyAgent(MyLSVMAgent):
@@ -58,6 +58,7 @@ class MyAgent(MyLSVMAgent):
         return self.save_path_prefix + self.save_path_suffix + ".npy"
     
     def setup(self, restarts=20):
+        np.random.seed(42)
         # Set up separate Q-learning apparatus for national and regional bidders
         self.save_path_suffix = "_nat" if self.is_national_bidder() else "_reg"
         self.my_states = []
@@ -410,7 +411,8 @@ class MyAgent(MyLSVMAgent):
 
         # Q-learning update and state transition
         self.s_prime = self.determine_state()
-        self.update_rule(reward)
+        if self.training_mode:
+            self.update_rule(reward)
         self.a = self.choose_next_move(self.s_prime)
         self.s = self.s_prime
         self.s_prime = None 
@@ -422,7 +424,7 @@ class MyAgent(MyLSVMAgent):
         self.current_auction_reward = 0
 
         # Only save here to boost performance
-        if self.save_path_prefix:
+        if (self.training_mode and self.save_path_prefix):
             with open(self._get_save_path(), 'wb') as saved_q_table:
                 np.save(saved_q_table, self.q)
 
@@ -498,12 +500,11 @@ class Trainer:
         fig, ax = plt.subplots(figsize=(10, 5))
         ax.plot(ys, alpha=0.6, linewidth=1, label="raw")
 
-        # Use smoothing of 50 if enough data
-        window = 100
-        if len(ys) >= window:
-            kernel = np.ones(window) / window
-            ys_smooth = np.convolve(ys, kernel, mode="same")
-            ax.plot(ys_smooth, alpha=0.8, linewidth=1, label="smoothed")
+        # Fit linear function
+        x = np.arange(len(ys))
+        a, b = np.polyfit(x, ys, 1)
+        trend = a * x + b
+        ax.plot(trend, linewidth=2, label=f"linear (slope={a:.3g})")
 
         # Annotate and save
         ax.set_xlabel(xlabel)
@@ -590,15 +591,13 @@ class Trainer:
     @staticmethod
     def run():
         # Run training and generate learning curves
-        # 0. Create arena with one learner and everybody else fixed
-        agent = MyAgent("MyAgent", training_mode=True)
-        # Instead of mixed opponents, create a curriculum
+        # 0. Create a curriculum of fixed opponents
         opponents_list = [
             # Phase 1. MinBidder
-            (15, [MinBidAgent(f"MinBidder{i}") for i in range(5)]),
+            (10, [MinBidAgent(f"MinBidder{i}") for i in range(5)]),
 
             # Phase 2. MinBidder + JumpBidder
-            (15, [MinBidAgent(f"MinBidder{i}") for i in range(2)]
+            (10, [MinBidAgent(f"MinBidder{i}") for i in range(2)]
             + [JumpBidder(f"JumpBidder{i}") for i in range(3)]),
             
             # Phase 3. MinBidder + JumpBidder + TruthfulBidder
@@ -607,23 +606,26 @@ class Trainer:
             + [TruthfulBidder(f"TruthfulBidder{i}") for i in range(2)]),
             
             # Phase 4. Self-play
-            (100, [MyAgent(f"MyAgent{i}", training_mode=False) for i in range(5)]),
+            (25, [MyAgent(f"MyAgent{i}", training_mode=False) for i in range(5)]),
 
             # Phase 5: All hiccups break loose
-            (100, [MyAgent(f"MyAgent{i}", training_mode=False) for i in range(2)]
+            (50, [MyAgent(f"MyAgent{i}", training_mode=False) for i in range(2)]
             + [MinBidAgent("MinBidder1"), JumpBidder("JumpBidder1"), TruthfulBidder("TruthfulBidder1")])
         ]
 
-        # 1. Initialize Q-table
+        agent = MyAgent("MyAgent", training_mode=False)
+        # 1. Initialize Q-table, but don't train yet
         arena = LSVMArena(
             num_cycles_per_player=1,
-            players=[agent] + [MinBidAgent(f"MinBidder{i}") for i in range(6)]
+            players=[agent]
+                    + [MinBidAgent(f"MinBidder{i}") for i in range(5)]
         )
         arena.run()
-        q_0 = agent.q.copy()
-        policy_0 = np.argmax(q_0, axis=1)
+        q_curr = agent.q.copy()
+        policy_curr = np.argmax(q_curr, axis=1)
 
-        # 2. Train in phases
+        # 2. Initialize trained agent and train in phases
+        agent = MyAgent("MyAgent", training_mode=True)
         for phase, (num_cycles, opponents) in enumerate(opponents_list):
             print(f"\n=== Training Phase {phase+1} ===")
             # Train against current opponents
@@ -634,31 +636,27 @@ class Trainer:
             arena.run()
 
             # Compare Q-tables and policies
-            q_1 = agent.q.copy()
-            policy_1 = np.argmax(q_1, axis=1)
-            Trainer._print_q_change(q_0, q_1, phase)
-            Trainer._print_policy_change(policy_0, policy_1, phase)
+            q_next = agent.q.copy()
+            policy_next = np.argmax(q_next, axis=1)
+            Trainer._print_q_change(q_curr, q_next, phase+1)
+            Trainer._print_policy_change(policy_curr, policy_next, phase+1)
 
             # Plot learning curves
-            Trainer._plot_learning_curves(agent, num_cycles, phase)
+            Trainer._plot_learning_curves(agent, num_cycles, phase+1)
             agent._reset_reward_tracker() # So that the curves are fresh next phase
+
+            # Update curr with next
+            q_curr = q_next
+            policy_curr = policy_next
 
         # This is our final agent
         return agent
 
 if __name__ == "__main__":
     # Train agent against fixed opponents
-    trained_agent = Trainer.run()
+    # trained_agent = Trainer.run()
+    # exit()
 
-    # Test agent against fixed opponents
-    arena = LSVMArena(
-        num_cycles_per_player=3,
-        timeout=1,
-        players=[MyAgent(f"MyAgent{i}", training_mode=False) for i in range(4)]
-                + [MinBidAgent("MinBidder1"), JumpBidder("JumpBidder1"), TruthfulBidder("TruthfulBidder1")]
-    )
-    arena.run()
-    exit()
     # Heres an example of how to process a singular file 
     # process_saved_game(path_from_local_root("saved_games/2024-04-08_17-36-34.json.gz"))
     # or every file in a directory 

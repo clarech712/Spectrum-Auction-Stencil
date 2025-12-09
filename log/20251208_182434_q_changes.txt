@@ -1,0 +1,60 @@
+=== Phase 1 ===
+Average absolute Q-change: 13.9793
+Average Q-improvement: 4.5064
+States with Q-improvement: 143/216
+Q-value spread (final_q): 384.780
+Top improving states:
+  State 46: +63.279
+  State 28: +60.150
+  State 40: +50.413
+  State 25: +47.918
+  State 19: +45.472
+
+=== Phase 2 ===
+Average absolute Q-change: 9.0945
+Average Q-improvement: -0.7946
+States with Q-improvement: 99/216
+Q-value spread (final_q): 234.754
+Top improving states:
+  State 85: +39.437
+  State 61: +28.205
+  State 73: +25.119
+  State 88: +21.433
+  State 82: +17.156
+
+=== Phase 3 ===
+Average absolute Q-change: 5.5674
+Average Q-improvement: -0.9043
+States with Q-improvement: 80/216
+Q-value spread (final_q): 240.322
+Top improving states:
+  State 97: +22.112
+  State 79: +22.090
+  State 70: +12.857
+  State 82: +11.787
+  State 55: +11.446
+
+=== Phase 4 ===
+Average absolute Q-change: 5.7168
+Average Q-improvement: -2.4427
+States with Q-improvement: 85/216
+Q-value spread (final_q): 191.079
+Top improving states:
+  State 157: +10.428
+  State 151: +10.276
+  State 160: +10.153
+  State 112: +9.852
+  State 154: +9.028
+
+=== Phase 5 ===
+Average absolute Q-change: 5.0999
+Average Q-improvement: -0.4031
+States with Q-improvement: 99/216
+Q-value spread (final_q): 178.400
+Top improving states:
+  State 88: +20.751
+  State 64: +16.637
+  State 196: +12.376
+  State 130: +12.365
+  State 172: +12.100
+

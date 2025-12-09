@@ -1,0 +1,45 @@
+=== Phase 1 ===
+Policy changes: 186/216 (86.1%)
+Change distribution:
+  FocusedC > Aggressive1: 9 states
+  Connector > Aggressive0: 9 states
+  Aggressive0 > FocusedC: 9 states
+  FocusedL > FocusedC: 8 states
+  FocusedC > Aggressive0: 8 states
+
+=== Phase 2 ===
+Policy changes: 87/216 (40.3%)
+Change distribution:
+  Aggressive1 > Aggressive0: 10 states
+  Aggressive0 > Aggressive1: 8 states
+  Aggressive0 > FocusedL: 6 states
+  Aggressive1 > FocusedC: 6 states
+  FocusedC > Aggressive1: 4 states
+
+=== Phase 3 ===
+Policy changes: 105/216 (48.6%)
+Change distribution:
+  Aggressive0 > Aggressive1: 10 states
+  Aggressive1 > Aggressive0: 9 states
+  Aggressive0 > FocusedC: 8 states
+  FocusedL > Aggressive1: 7 states
+  Aggressive1 > FocusedC: 7 states
+
+=== Phase 4 ===
+Policy changes: 95/216 (44.0%)
+Change distribution:
+  FocusedC > Aggressive1: 8 states
+  Aggressive0 > FocusedC: 7 states
+  FocusedC > Aggressive0: 6 states
+  Aggressive1 > FocusedC: 5 states
+  Aggressive0 > Aggressive1: 5 states
+
+=== Phase 5 ===
+Policy changes: 102/216 (47.2%)
+Change distribution:
+  Aggressive1 > FocusedC: 10 states
+  FocusedC > Aggressive1: 8 states
+  Aggressive0 > Aggressive1: 8 states
+  Aggressive0 > FocusedC: 6 states
+  FocusedC > Aggressive0: 6 states
+

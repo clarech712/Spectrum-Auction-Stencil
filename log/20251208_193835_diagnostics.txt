@@ -1,0 +1,72 @@
+Total observations: 7229
+
+Phase (Feature 0):
+  Possible values: [0, 1, 2]
+  Distribution:
+    0: 780 observations (10.8%)
+    1: 5540 observations (76.6%)
+    2: 909 observations (12.6%)
+
+Market activity (Feature 1):
+  Possible values: [0, 1]
+  Distribution:
+    0: 2635 observations (36.5%)
+    1: 4594 observations (63.5%)
+
+Hottest region (Feature 2):
+  Possible values: [0, 1, 2]
+  Distribution:
+    0: 1908 observations (26.4%)
+    1: 3483 observations (48.2%)
+    2: 1838 observations (25.4%)
+
+My region (Feature 3):
+  Possible values: [0, 1, 2]
+  Distribution:
+    0: 2485 observations (34.4%)
+    1: 2196 observations (30.4%)
+    2: 2548 observations (35.2%)
+
+Allocation size (Feature 4):
+  Possible values: [0, 1]
+  Distribution:
+    0: 4988 observations (69.0%)
+    1: 2241 observations (31.0%)
+
+Price ratio (Feature 5):
+  Possible values: [0, 1]
+  Distribution:
+    0: 2443 observations (33.8%)
+    1: 4786 observations (66.2%)
+
+Unique states observed: 158/216
+
+State occupancy (top 10):
+  State 112: 387 (5.4%)
+  State 118: 351 (4.9%)
+  State 136: 247 (3.4%)
+  State 209: 231 (3.2%)
+  State 151: 231 (3.2%)
+  State 137: 218 (3.0%)
+  State 124: 203 (2.8%)
+  State 154: 202 (2.8%)
+  State 166: 171 (2.4%)
+  State 121: 167 (2.3%)
+
+Extended Results:                                                                                                                                                                 
+            Agent 1      Agent 2     Agent 3   Agent 4   Agent 5          Agent 6   A1 Score   A2 Score   A3 Score   A4 Score   A5 Score   A6 Score
+0  DiagnosticAgent  JumpBidder1  MinBidder1  MyAgent0  MyAgent1         MyAgent2  45.716937   8.903537  15.480067  21.347778  22.852125  22.227342
+1  DiagnosticAgent  JumpBidder1  MinBidder1  MyAgent0  MyAgent1  TruthfulBidder1  28.500671   8.899812   5.334728  58.092456  27.641054   8.939407
+2  DiagnosticAgent  JumpBidder1  MinBidder1  MyAgent0  MyAgent2  TruthfulBidder1  40.440336   8.620274   3.943746  60.603571  24.155245  17.711351
+3  DiagnosticAgent  JumpBidder1  MinBidder1  MyAgent1  MyAgent2  TruthfulBidder1  22.524713  11.762614  13.557153  37.248849  26.297556  13.856592
+4  DiagnosticAgent   MinBidder1    MyAgent0  MyAgent1  MyAgent2  TruthfulBidder1  17.034922   8.040864  43.509834  46.997849  46.403460   7.162885
+5      JumpBidder1   MinBidder1    MyAgent0  MyAgent1  MyAgent2  TruthfulBidder1   7.465011   5.827419  53.005104  46.351004  18.952903   8.539525
+Results: 
+         Agent Name  Final Score
+2         MyAgent0    47.711513
+3         MyAgent1    36.540857
+0  DiagnosticAgent    33.833496
+4         MyAgent2    22.814215
+5  TruthfulBidder1    10.257212
+6      JumpBidder1     8.584963
+1       MinBidder1     8.234342
